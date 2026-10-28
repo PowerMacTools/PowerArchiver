@@ -1,0 +1,9 @@
+[submodule "submodules/milsko"]
+	path = submodules/milsko
+	url = https://github.com/pyrite-dev/milsko
+[submodule "submodules/openstuffit"]
+	path = submodules/openstuffit
+	url = https://github.com/onionmixer/openstuffit
+[submodule "submodules/file"]
+	path = submodules/file
+	url = https://github.com/file/file
