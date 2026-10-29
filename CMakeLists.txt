@@ -23,11 +23,31 @@ target_link_libraries(openstuffit PUBLIC ZLIB::ZLIB)
 
 add_subdirectory(cmake/libmagic)
 
+# Copy only the icons that src/icon.cpp's icon_files table references.
+# Reconfigures whenever icon.cpp changes so the copied set stays in sync.
+set(ICON_DIR ${CMAKE_CURRENT_BINARY_DIR}/icons)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/icon.cpp)
+file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/src/icon.cpp icon_lines
+  REGEX "\"[A-Za-z0-9_.-]+\\.png\"")
+set(used_icons)
+foreach(line ${icon_lines})
+  string(REGEX MATCH "\"([A-Za-z0-9_.-]+\\.png)\"" _ "${line}")
+  list(APPEND used_icons ${CMAKE_MATCH_1})
+endforeach()
+list(REMOVE_DUPLICATES used_icons)
+file(REMOVE_RECURSE ${ICON_DIR})
+foreach(icon ${used_icons})
+  configure_file(${CMAKE_CURRENT_SOURCE_DIR}/icons/${icon} ${ICON_DIR}/${icon}
+    COPYONLY)
+endforeach()
+
 add_executable(${PROJECT_NAME} ${sources})
 
 # ost_decompress.h isn't part of openstuffit's public headers.
 target_include_directories(${PROJECT_NAME} PRIVATE ${OPENSTUFFIT_DIR}/src)
 target_compile_definitions(${PROJECT_NAME}
-  PRIVATE MARCHIVER_MAGIC_DATABASE="${MAGIC_DATABASE}")
+  PRIVATE MARCHIVER_MAGIC_DATABASE="${MAGIC_DATABASE}"
+          MARCHIVER_ICON_DIR="${ICON_DIR}")
 target_link_libraries(${PROJECT_NAME} Mw openstuffit magic)
 add_dependencies(${PROJECT_NAME} magic_database)
