@@ -7,7 +7,6 @@
 #include <string>
 
 Format *Format::from_file(std::filesystem::path path) {
-
   try {
     return new LibarchiveFormat(path);
   } catch (const std::exception &) {

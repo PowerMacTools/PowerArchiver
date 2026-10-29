@@ -17,8 +17,6 @@ static std::string error_string(archive *a) {
 static archive_ptr open_archive(const std::filesystem::path &path) {
   archive_ptr a(archive_read_new(), archive_read_free);
   archive_read_support_filter_all(a.get());
-  // archive_read_support_format_all() minus mtree and empty, which would
-  // claim plain text and empty files as archives.
   archive_read_support_format_ar(a.get());
   archive_read_support_format_cpio(a.get());
   archive_read_support_format_lha(a.get());
@@ -82,8 +80,11 @@ static std::string entry_prefix(const std::filesystem::path &path, size_t index,
   // most file formats have their "file magic" within this number of bytes
   static constexpr size_t type_prefix_size = 1024 * 16;
 
+  std::string data(type_prefix_size, '\0');
   archive_ptr a = open_archive(path);
   archive_entry *ent;
+  size_t size = 0;
+
   for (size_t i = 0; i <= index; i++) {
     int status = archive_read_next_header(a.get(), &ent);
     if (status != ARCHIVE_OK && status != ARCHIVE_WARN) {
@@ -98,8 +99,6 @@ static std::string entry_prefix(const std::filesystem::path &path, size_t index,
     return "";
   }
 
-  std::string data(type_prefix_size, '\0');
-  size_t size = 0;
   while (size < data.size()) {
     la_ssize_t n =
         archive_read_data(a.get(), data.data() + size, data.size() - size);
@@ -196,4 +195,112 @@ std::vector<Format::Entry> LibarchiveFormat::files() {
   }
 
   return root;
+}
+
+// Roots an archive path in dir.
+static std::string rooted(const std::filesystem::path &dir,
+                          const std::string &name) {
+  size_t start = name.find_first_not_of('/');
+  return (dir / (start == std::string::npos ? "" : name.substr(start)))
+      .string();
+}
+
+class LibarchiveExtraction : public Format::Extraction {
+public:
+  LibarchiveExtraction(const std::filesystem::path &path,
+                       const std::filesystem::path &dir)
+      : path(path),
+        // canonical so that ARCHIVE_EXTRACT_SECURE_NODOTDOT only sees '..'
+        // coming from the archive itself
+        root(std::filesystem::weakly_canonical(dir)), in(open_archive(path)),
+        out(archive_write_disk_new(), archive_write_free),
+        total(std::filesystem::file_size(path)) {
+    // No ARCHIVE_EXTRACT_SECURE_NOABSOLUTEPATHS, since every path is rooted
+    // in dir and so absolute. rooted() takes care of absolute entry paths
+    // instead.
+    archive_write_disk_set_options(out.get(),
+                                   ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM |
+                                       ARCHIVE_EXTRACT_SECURE_SYMLINKS |
+                                       ARCHIVE_EXTRACT_SECURE_NODOTDOT);
+    archive_write_disk_set_standard_lookup(out.get());
+  }
+
+  bool step() override {
+    if (!in_entry) {
+      return next_entry();
+    }
+
+    const void *buf;
+    size_t size;
+    la_int64_t offset;
+    int status = archive_read_data_block(in.get(), &buf, &size, &offset);
+    if (status == ARCHIVE_EOF) {
+      if (archive_write_finish_entry(out.get()) < ARCHIVE_WARN) {
+        throw std::runtime_error("failed to extract " + name + ": " +
+                                 error_string(out.get()));
+      }
+      in_entry = false;
+      return true;
+    }
+    if (status != ARCHIVE_OK) {
+      throw std::runtime_error("failed to read " + name + ": " +
+                               error_string(in.get()));
+    }
+    if (archive_write_data_block(out.get(), buf, size, offset) < ARCHIVE_WARN) {
+      throw std::runtime_error("failed to write " + name + ": " +
+                               error_string(out.get()));
+    }
+    return true;
+  }
+
+  double progress() override {
+    if (total == 0) {
+      return 0;
+    }
+    double done = (double)archive_filter_bytes(in.get(), -1) / total;
+    return done < 0 ? 0 : done > 1 ? 1 : done;
+  }
+
+private:
+  bool next_entry() {
+    archive_entry *ent;
+    int status = archive_read_next_header(in.get(), &ent);
+    if (status == ARCHIVE_EOF) {
+      archive_write_close(out.get());
+      return false;
+    }
+    if (status != ARCHIVE_OK && status != ARCHIVE_WARN) {
+      throw std::runtime_error("failed to read " + path.string() + ": " +
+                               error_string(in.get()));
+    }
+
+    // Hardlink targets are paths inside the archive too.
+    name = entry_path(ent);
+    archive_entry_set_pathname_utf8(ent, rooted(root, name).c_str());
+    const char *hardlink = archive_entry_hardlink_utf8(ent);
+    if (hardlink) {
+      archive_entry_set_hardlink_utf8(ent, rooted(root, hardlink).c_str());
+    }
+
+    status = archive_write_header(out.get(), ent);
+    if (status != ARCHIVE_OK && status != ARCHIVE_WARN) {
+      throw std::runtime_error("failed to extract " + name + ": " +
+                               error_string(out.get()));
+    }
+    in_entry = true;
+    return true;
+  }
+
+  using write_ptr = std::unique_ptr<archive, decltype(&archive_write_free)>;
+  std::filesystem::path path, root;
+  archive_ptr in;
+  write_ptr out;
+  std::uintmax_t total;
+  std::string name;
+  bool in_entry = false;
+};
+
+std::unique_ptr<Format::Extraction>
+LibarchiveFormat::extract(const std::filesystem::path &dir) {
+  return std::make_unique<LibarchiveExtraction>(path, dir);
 }

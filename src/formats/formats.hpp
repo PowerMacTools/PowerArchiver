@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -38,4 +39,21 @@ public:
   virtual ~Format() = default;
 
   virtual std::vector<Entry> files() = 0;
+
+  class Extraction {
+  public:
+    virtual ~Extraction() = default;
+
+    virtual bool step() = 0;
+    virtual double progress() = 0;
+
+    // Entries left out because the format can't extract them.
+    virtual const std::vector<std::string> &skipped() { return none; }
+
+  private:
+    std::vector<std::string> none;
+  };
+
+  virtual std::unique_ptr<Extraction>
+  extract(const std::filesystem::path &dir) = 0;
 };

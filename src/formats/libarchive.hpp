@@ -9,6 +9,8 @@ public:
   LibarchiveFormat(std::filesystem::path path);
 
   std::vector<Entry> files() override;
+  std::unique_ptr<Extraction>
+  extract(const std::filesystem::path &dir) override;
 
 private:
   std::filesystem::path path;

@@ -13,6 +13,8 @@ public:
   StuffitFormat &operator=(const StuffitFormat &) = delete;
 
   std::vector<Entry> files() override;
+  std::unique_ptr<Extraction>
+  extract(const std::filesystem::path &dir) override;
 
 private:
   ost_archive_handle *handle = nullptr;

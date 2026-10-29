@@ -157,3 +157,81 @@ std::vector<Format::Entry> StuffitFormat::files() {
 
   return root;
 }
+
+class StuffitExtraction : public Format::Extraction {
+public:
+  StuffitExtraction(const ost_archive_handle *handle,
+                    const std::filesystem::path &dir)
+      : handle(handle), output_dir(dir.string()),
+        count(ost_archive_handle_entry_count(handle)) {}
+
+  bool step() override {
+    if (index >= count) {
+      return false;
+    }
+    const ost_entry *ent = ost_archive_handle_entry(handle, index++);
+    if (!ent || !ent->path) {
+      return true;
+    }
+
+    // A directory's path would select everything inside it too, so create
+    // directories here rather than through openstuffit.
+    if (ent->is_dir) {
+      std::filesystem::path relative =
+          std::filesystem::path(ent->path).relative_path();
+      for (const auto &part : relative) {
+        if (part == "..") {
+          throw std::runtime_error(std::string("unsafe path: ") + ent->path);
+        }
+      }
+      std::filesystem::create_directories(std::filesystem::path(output_dir) /
+                                          relative);
+      return true;
+    }
+
+    const char *include_paths[] = {ent->path};
+    ost_extract_options options = {};
+    options.output_dir = output_dir.c_str();
+    // Classic Mac files often keep everything in their resource fork. Store it
+    // natively where we can, and in an AppleDouble "._" file elsewhere, which
+    // also carries the Finder type and creator.
+#ifdef __APPLE__
+    options.forks = OST_FORKS_NATIVE;
+#else
+    options.forks = OST_FORKS_APPLEDOUBLE;
+#endif
+    options.finder = OST_FINDER_SKIP;
+    options.collision = OST_COLLISION_OVERWRITE;
+    options.preserve_time = true;
+    options.verify_crc = true;
+    options.include_paths = include_paths;
+    options.include_path_count = 1;
+
+    ost_status status = ost_archive_handle_extract(handle, &options);
+    if (status == OST_ERR_UNSUPPORTED) {
+      // e.g. an unsupported compression method; carry on with the rest
+      unsupported.push_back(ent->path);
+      return true;
+    }
+    if (status != OST_OK) {
+      throw std::runtime_error(std::string("failed to extract ") + ent->path +
+                               ": " + ost_status_string(status));
+    }
+    return true;
+  }
+
+  double progress() override { return count == 0 ? 1 : (double)index / count; }
+
+  const std::vector<std::string> &skipped() override { return unsupported; }
+
+private:
+  const ost_archive_handle *handle;
+  std::string output_dir;
+  size_t count, index = 0;
+  std::vector<std::string> unsupported;
+};
+
+std::unique_ptr<Format::Extraction>
+StuffitFormat::extract(const std::filesystem::path &dir) {
+  return std::make_unique<StuffitExtraction>(handle, dir);
+}
