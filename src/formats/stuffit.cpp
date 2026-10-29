@@ -134,6 +134,7 @@ std::vector<Format::Entry> StuffitFormat::files() {
           leaf.is_dir = leaf.is_dir || ent->is_dir;
           if (leaf.is_dir) {
             leaf.set_type("directory");
+            leaf.set_mime_type("directory");
           } else {
             leaf.set_type_function(
                 [handle = handle, ent] { return entry_type(handle, ent); });

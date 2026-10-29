@@ -737,6 +737,7 @@ static std::unordered_map<std::string, MwPixmap> icon_map = {
     {"image/x-kiss-cel", NULL},
     {"inode/blockdevice", NULL},
     {"inode/chardevice", NULL},
+    {"directory", NULL},
     {"inode/directory", NULL},
     {"inode/fifo", NULL},
     {"inode/mount-point", NULL},
@@ -1909,7 +1910,9 @@ static std::vector<std::pair<std::string, std::vector<std::string>>>
          {"text/x-editorconfig", "text/x-ms-regedit", "text/x-iptables",
           "text/x-dbus-service", "text/x-systemd-unit"}},
         {"Folder_generic.png",
-         {"application/gnunet-directory", "inode/directory",
+         {"directory", /* not a valid mime type but a special case for folders
+                        */
+          "application/gnunet-directory", "inode/directory",
           "inode/mount-point"}},
         {"Misc_Atari2600jr.png",
          {"application/x-atari-2600-rom",
