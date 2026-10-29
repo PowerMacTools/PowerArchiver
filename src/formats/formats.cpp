@@ -1,7 +1,9 @@
 #include "formats.hpp"
+#include "libarchive.hpp"
 #include "stuffit.hpp"
 #include <filesystem>
 #include <magic.h>
+#include <stdexcept>
 #include <string>
 
 Format *Format::from_file(std::filesystem::path path) {
@@ -9,7 +11,11 @@ Format *Format::from_file(std::filesystem::path path) {
     return new StuffitFormat(path);
   }
 
-  return nullptr;
+  try {
+    return new LibarchiveFormat(path);
+  } catch (const std::exception &) {
+    return nullptr;
+  }
 }
 
 const std::string &Format::Entry::type() {

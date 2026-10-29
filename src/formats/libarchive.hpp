@@ -1,0 +1,15 @@
+#pragma once
+
+#include "formats.hpp"
+
+// Anything libarchive can read: zip, tar (and compressed tarballs), 7z, rar,
+// cpio, iso9660, cab, lha, xar, ar, ...
+class LibarchiveFormat : public Format {
+public:
+  LibarchiveFormat(std::filesystem::path path);
+
+  std::vector<Entry> files() override;
+
+private:
+  std::filesystem::path path;
+};

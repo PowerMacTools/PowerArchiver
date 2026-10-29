@@ -7,3 +7,6 @@
 [submodule "submodules/file"]
 	path = submodules/file
 	url = https://github.com/file/file
+[submodule "submodules/libarchive"]
+	path = submodules/libarchive
+	url = https://github.com/libarchive/libarchive
