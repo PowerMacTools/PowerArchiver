@@ -1,10 +1,14 @@
 #include <Mw/Milsko.h>
 
 #include "Mw/Core.h"
+#ifdef macintosh
+#include <Mw/LowLevel/QuickDraw.h>
+#endif
 #include "formats/formats.hpp"
 #include "fs/fs.hpp"
 #include "icon.hpp"
 #include <chrono>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <string>
@@ -217,6 +221,93 @@ static void open_archive(const std::string &path) {
   MwForceRender(context::window);
 }
 
+static void choose_archive() {
+#ifdef macintosh
+  std::string path;
+  switch (fs::choose_file("Open", path)) {
+  case fs::choice::chosen:
+    open_archive(path);
+    return;
+  case fs::choice::cancelled:
+    return;
+  case fs::choice::unavailable:
+    break;
+  }
+#endif
+  MwWidget chooser = MwFileChooser(context::window, "Open");
+  MwSetString(chooser, MwNbackground,
+              MwGetInteger(chooser, MwNdarkTheme) ? MwDefaultDarkBackground
+                                                  : MwDefaultBackground);
+  MwAddUserHandler(
+      chooser, MwNfileChosenHandler,
+      +[](MwWidget handle, void *user, void *call) {
+        open_archive((const char *)call);
+      },
+      NULL);
+}
+
+static void choose_extract_dir() {
+  if (!context::format) {
+    show_message("No archive is open.", "Extract", MwMB_ICONERROR);
+    return;
+  }
+#ifdef macintosh
+  std::string dir;
+  switch (fs::choose_folder("Extract to", dir)) {
+  case fs::choice::chosen:
+    extract_to(dir);
+    return;
+  case fs::choice::cancelled:
+    return;
+  case fs::choice::unavailable:
+    break;
+  }
+#endif
+  MwWidget chooser = MwDirectoryChooser(context::window, "Extract to");
+  MwSetString(chooser, MwNbackground,
+              MwGetInteger(chooser, MwNdarkTheme) ? MwDefaultDarkBackground
+                                                  : MwDefaultBackground);
+  MwAddUserHandler(
+      chooser, MwNdirectoryChosenHandler,
+      +[](MwWidget handle, void *user, void *call) {
+        extract_to((const char *)call);
+      },
+      NULL);
+}
+
+#ifdef macintosh
+// The File menu's items, which go above Milsko's Quit.
+enum file_item { item_open = 1, item_extract, item_find };
+
+static void add_file_item(MenuHandle menu, short after, const char *text) {
+  // AppendMenu metacharacters, such as "/O" for the shortcut, work here too
+  Str255 item;
+  item[0] = (unsigned char)std::strlen(text);
+  std::memcpy(item + 1, text, item[0]);
+  InsertMenuItem(menu, item, after);
+}
+
+static void add_native_menu() {
+  MenuHandle file = MwLLQuickdrawGetFileMenu();
+  // \xC9 is an ellipsis in MacRoman. Find isn't implemented, so it's disabled.
+  add_file_item(file, 0, "Open\xC9/O");
+  add_file_item(file, item_open, "Extract\xC9/E");
+  add_file_item(file, item_extract, "(Find\xC9/F");
+  add_file_item(file, item_find, "(-");
+
+  MwLLQuickdrawSetMenuHandler(+[](MenuHandle menu, short item) {
+    if (menu != MwLLQuickdrawGetFileMenu()) {
+      return;
+    }
+    if (item == item_open) {
+      choose_archive();
+    } else if (item == item_extract) {
+      choose_extract_dir();
+    }
+  });
+}
+#endif
+
 int main(int argc, char *argv[]) {
   MwPixmap appIcon;
   MwLibraryInit();
@@ -225,10 +316,17 @@ int main(int argc, char *argv[]) {
       MwVaCreateWidget(MwWindowClass, NULL, NULL, MwDEFAULT, MwDEFAULT, 640,
                        480, MwNtitle, "PowerArchiver", NULL);
 
+#ifdef macintosh
+  // the options go in the menu bar instead of a menu in the window
+  add_native_menu();
+  int top = 5;
+#else
   context::menu =
       MwCreateWidget(MwMenuClass, NULL, context::window, 0, 0, 640, 32);
-  context::panes = MwVaCreateWidget(MwTableClass, NULL, context::window, 5, 32,
-                                    640 - 10, 480 - 32 - 5, MwNorientation,
+  int top = 32;
+#endif
+  context::panes = MwVaCreateWidget(MwTableClass, NULL, context::window, 5, top,
+                                    640 - 10, 480 - top - 5, MwNorientation,
                                     MwHORIZONTAL, MwNcolumns, 4, NULL);
 
   context::filelist = MwVaCreateWidget(
@@ -301,72 +399,21 @@ int main(int argc, char *argv[]) {
       },
       NULL);
 
+#ifndef macintosh
   context::open_menu = MwMenuAdd(context::menu, NULL, "Open");
   context::extract_menu = MwMenuAdd(context::menu, NULL, "Extract");
   MwMenuAdd(context::menu, NULL, "Find");
   MwAddUserHandler(
       context::menu, MwNmenuHandler,
       +[](MwWidget handle, void *user, void *call) {
-        MwWidget chooser;
-
         if (call == context::open_menu) {
-#ifdef macintosh
-          std::string path;
-          switch (fs::choose_file("Open", path)) {
-          case fs::choice::chosen:
-            open_archive(path);
-            return;
-          case fs::choice::cancelled:
-            return;
-          case fs::choice::unavailable:
-            break;
-          }
-#endif
-          chooser = MwFileChooser(context::window, "Open");
-          MwSetString(chooser, MwNbackground,
-                      MwGetInteger(chooser, MwNdarkTheme)
-                          ? MwDefaultDarkBackground
-                          : MwDefaultBackground);
-          MwAddUserHandler(
-              chooser, MwNfileChosenHandler,
-              +[](MwWidget handle, void *user, void *call) {
-                open_archive((const char *)call);
-              },
-              NULL);
-          return;
+          choose_archive();
+        } else if (call == context::extract_menu) {
+          choose_extract_dir();
         }
-        if (call != context::extract_menu) {
-          return;
-        }
-        if (!context::format) {
-          show_message("No archive is open.", "Extract", MwMB_ICONERROR);
-          return;
-        }
-#ifdef macintosh
-        std::string dir;
-        switch (fs::choose_folder("Extract to", dir)) {
-        case fs::choice::chosen:
-          extract_to(dir);
-          return;
-        case fs::choice::cancelled:
-          return;
-        case fs::choice::unavailable:
-          break;
-        }
-#endif
-        chooser = MwDirectoryChooser(context::window, "Extract to");
-        MwSetString(chooser, MwNbackground,
-                    MwGetInteger(chooser, MwNdarkTheme)
-                        ? MwDefaultDarkBackground
-                        : MwDefaultBackground);
-        MwAddUserHandler(
-            chooser, MwNdirectoryChosenHandler,
-            +[](MwWidget handle, void *user, void *call) {
-              extract_to((const char *)call);
-            },
-            NULL);
       },
       NULL);
+#endif
 
   // classic Mac OS has no command line, so there it's Open or nothing
   if (argc >= 2) {
