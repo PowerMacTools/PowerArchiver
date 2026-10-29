@@ -227,9 +227,9 @@ int main(int argc, char *argv[]) {
 
   context::menu =
       MwCreateWidget(MwMenuClass, NULL, context::window, 0, 0, 640, 32);
-  context::panes = MwVaCreateWidget(MwTableClass, NULL, context::window, 0, 27,
-                                    640, 480 - 27, MwNorientation, MwHORIZONTAL,
-                                    MwNcolumns, 4, NULL);
+  context::panes = MwVaCreateWidget(MwTableClass, NULL, context::window, 5, 32,
+                                    640 - 10, 480 - 32 - 5, MwNorientation,
+                                    MwHORIZONTAL, MwNcolumns, 4, NULL);
 
   context::filelist = MwVaCreateWidget(
       MwTreeViewClass, NULL, context::panes, 0, 0, 640, 480, MwNratio, 255,
