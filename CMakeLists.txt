@@ -10,42 +10,22 @@ set(MW_BUILD_SHARED OFF)
 set(MW_BUILD_STATIC ON)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/submodules/milsko)
 
+# libarchive and its dependencies, all statically linked from submodules.
+add_subdirectory(cmake/libarchive)
+
 # openstuffit only ships a Makefile, so build its library sources here.
 # openstuffit.c is the CLI's main() and is left out.
 set(OPENSTUFFIT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/submodules/openstuffit)
 file(GLOB openstuffit_sources ${OPENSTUFFIT_DIR}/src/ost_*.c)
-find_package(ZLIB REQUIRED)
 add_library(openstuffit STATIC ${openstuffit_sources})
 set_target_properties(openstuffit PROPERTIES C_STANDARD 99)
 target_compile_definitions(openstuffit PRIVATE _FILE_OFFSET_BITS=64)
 target_include_directories(openstuffit
   PUBLIC ${OPENSTUFFIT_DIR}/include
   PRIVATE ${OPENSTUFFIT_DIR}/src)
-target_link_libraries(openstuffit PUBLIC ZLIB::ZLIB)
+target_link_libraries(openstuffit PUBLIC zlib)
 
 add_subdirectory(cmake/libmagic)
-
-# Only archive_static is needed; skip libarchive's CLI tools, tests and
-# install rules. EXCLUDE_FROM_ALL keeps its shared library out of the build.
-set(ENABLE_TAR OFF)
-set(ENABLE_CPIO OFF)
-set(ENABLE_CAT OFF)
-set(ENABLE_UNZIP OFF)
-set(ENABLE_TEST OFF)
-set(ENABLE_INSTALL OFF)
-
-# Don't let libarchive pick up system libraries; it has to build for targets
-# like classic Mac OS where there are none. Compression/crypto libraries get
-# added back as statically linked submodules.
-foreach(dep MBEDTLS NETTLE OPENSSL MD LIBB2 LZ4 LZO LZMA ZSTD ZLIB BZip2
-            LIBXML2 BSDXML EXPAT WIN32_XMLLITE PCREPOSIX PCRE2POSIX LIBGCC CNG
-            XATTR ACL ICONV)
-  set(ENABLE_${dep} OFF)
-endforeach()
-set(POSIX_REGEX_LIB NONE CACHE STRING "" FORCE)
-
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/submodules/libarchive
-  EXCLUDE_FROM_ALL)
 
 # Copy only the icons that src/icon.cpp's icon_files table references.
 # Reconfigures whenever icon.cpp changes so the copied set stays in sync.

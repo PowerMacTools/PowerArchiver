@@ -10,3 +10,21 @@
 [submodule "submodules/libarchive"]
 	path = submodules/libarchive
 	url = https://github.com/libarchive/libarchive
+[submodule "submodules/bzip2"]
+	path = submodules/bzip2
+	url = https://sourceware.org/git/bzip2.git
+[submodule "submodules/zstd"]
+	path = submodules/zstd
+	url = https://github.com/facebook/zstd
+[submodule "submodules/lz4"]
+	path = submodules/lz4
+	url = https://github.com/lz4/lz4
+[submodule "submodules/mbedtls"]
+	path = submodules/mbedtls
+	url = https://github.com/Mbed-TLS/mbedtls
+[submodule "submodules/xz"]
+	path = submodules/xz
+	url = https://github.com/tukaani-project/xz
+[submodule "submodules/zlib"]
+	path = submodules/zlib
+	url = https://github.com/madler/zlib

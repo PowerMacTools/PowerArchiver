@@ -7,15 +7,17 @@
 #include <string>
 
 Format *Format::from_file(std::filesystem::path path) {
-  if (path.extension() == ".sit") {
-    return new StuffitFormat(path);
-  }
 
   try {
     return new LibarchiveFormat(path);
   } catch (const std::exception &) {
-    return nullptr;
+    try {
+      return new StuffitFormat(path);
+    } catch (const std::exception &) {
+      return nullptr;
+    }
   }
+  return nullptr;
 }
 
 const std::string &Format::Entry::type() {
