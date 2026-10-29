@@ -347,6 +347,42 @@ choice choose_folder(const std::string &title, std::string &path) {
   return run_dialog(title, true, path);
 }
 
+// The Finder sends files dropped on the application's icon, or opened with it,
+// as an Open Documents Apple event.
+static void (*open_document)(const std::string &path);
+
+static OSErr open_documents_event(const AppleEvent *event, AppleEvent *reply,
+                                  long refcon) {
+  AEDescList docs;
+  long count;
+  if (AEGetParamDesc(event, keyDirectObject, typeAEList, &docs) != noErr) {
+    return errAEEventNotHandled;
+  }
+  if (AECountItems(&docs, &count) == noErr) {
+    for (long i = 1; i <= count; i++) {
+      FSSpec spec;
+      AEKeyword keyword;
+      DescType type;
+      Size size;
+      std::string path;
+      if (AEGetNthPtr(&docs, i, typeFSS, &keyword, &type, &spec, sizeof spec,
+                      &size) == noErr &&
+          full_path(spec, path)) {
+        open_document(path);
+      }
+    }
+  }
+  AEDisposeDesc(&docs);
+  return noErr;
+}
+
+void on_open_documents(void (*open)(const std::string &path)) {
+  // replaces Milsko's handler, which turns the event down
+  static AEEventHandlerUPP handler = NewAEEventHandlerUPP(open_documents_event);
+  open_document = open;
+  AEInstallEventHandler(kCoreEventClass, kAEOpenDocuments, handler, 0, false);
+}
+
 } // namespace fs
 
 #endif

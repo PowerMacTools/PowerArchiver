@@ -34,6 +34,10 @@ bool set_finder_info(const std::string &path, const std::uint8_t type[4],
 enum class choice { chosen, cancelled, unavailable };
 choice choose_file(const std::string &title, std::string &path);
 choice choose_folder(const std::string &title, std::string &path);
+
+// Calls open with each file the Finder opens with the application, such as
+// those dropped on its icon. Call after MwLibraryInit().
+void on_open_documents(void (*open)(const std::string &path));
 #endif
 
 } // namespace fs

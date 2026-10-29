@@ -24,6 +24,10 @@ struct context {
   static std::unique_ptr<Format::Extraction> extraction;
   static std::string extract_dir;
   static MwWidget progress_window, progress_bar;
+
+  // Archives the Finder asked to open, opened from the tick handler rather
+  // than in the middle of Milsko's event handling.
+  static std::vector<std::string> pending;
 };
 
 MwWidget context::window, context::menu, context::panes, context::filelist;
@@ -35,6 +39,7 @@ std::unordered_map<void *, context> context::entries;
 std::unique_ptr<Format::Extraction> context::extraction;
 std::string context::extract_dir;
 MwWidget context::progress_window, context::progress_bar;
+std::vector<std::string> context::pending;
 
 static std::string wrap_text(MwWidget widget, std::string str, int width = -1) {
   std::string strbuf;
@@ -269,6 +274,32 @@ int main(int argc, char *argv[]) {
   setup_pixmap_table(context::table_icon);
 
   MwAddUserHandler(context::window, MwNtickHandler, extract_tick, NULL);
+
+#ifdef macintosh
+  fs::on_open_documents(
+      +[](const std::string &path) { context::pending.push_back(path); });
+  MwAddUserHandler(
+      context::window, MwNtickHandler,
+      +[](MwWidget handle, void *user, void *call) {
+        // moved out first, since opening may show a message box, which runs
+        // the event loop and could add to the list
+        std::vector<std::string> paths;
+        paths.swap(context::pending);
+        for (auto &path : paths) {
+          open_archive(path);
+        }
+      },
+      NULL);
+#endif
+
+  // open archives dropped anywhere on the window
+  MwVaApply(context::window, MwNacceptsDnD, 1, NULL);
+  MwAddUserHandler(
+      context::window, MwNdragAndDropHandler,
+      +[](MwWidget handle, void *user, void *call) {
+        open_archive((const char *)call);
+      },
+      NULL);
 
   context::open_menu = MwMenuAdd(context::menu, NULL, "Open");
   context::extract_menu = MwMenuAdd(context::menu, NULL, "Extract");
