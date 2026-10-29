@@ -1,5 +1,6 @@
 #include <Mw/Milsko.h>
 
+#include "Mw/Core.h"
 #include "formats/formats.hpp"
 #include <functional>
 #include <string>
@@ -23,16 +24,21 @@ static std::string wrap_text(MwWidget widget, std::string str) {
   MwUTF8ToUTF32(str.c_str(), chars.data());
 
   int handle_width = MwGetInteger(widget, MwNwidth);
+  int last_space = 0, n = 0;
   for (auto ch : str) {
-    strbuf += ch;
+    n++;
     if (ch == ' ') {
-      auto placeholder = MwTextWidth(widget, NULL, strbuf.c_str());
-      printf("%d >= %d\n", placeholder, handle_width);
-      if (placeholder >= handle_width) {
-        strfinal += strbuf;
-        strfinal += "\n";
-        strbuf = "";
+      last_space = n - 1;
+      if (last_space > strbuf.size()) {
+        last_space = strbuf.size() - 1;
       }
+    }
+    strbuf += ch;
+    auto placeholder = MwTextWidth(widget, NULL, strbuf.c_str());
+    if (placeholder > handle_width - 3) {
+      strfinal += strbuf.substr(0, last_space);
+      strfinal += "\n";
+      strbuf = strbuf.substr(last_space);
     }
   }
   strfinal += strbuf;
@@ -68,6 +74,8 @@ int main(int argc, char *argv[]) {
       +[](MwWidget handle, void *user, void *call) {
         std::unordered_map<void *, context> *entries = (decltype(entries))user;
         context lmao = entries->at(call);
+        MwVaApply(context::filelist, MwNratio, 2, NULL);
+        MwStep(context::window);
 
         auto wrapped_name = wrap_text(context::info, lmao.entry.name);
         auto wrapped_type = wrap_text(context::info, lmao.entry.type());
@@ -75,7 +83,6 @@ int main(int argc, char *argv[]) {
         MwVaApply(context::info_name, MwNtext, wrapped_name.c_str(), NULL);
         MwVaApply(context::info_type, MwNtext, wrapped_type.c_str(), NULL);
         MwForceRender(context::window);
-        MwVaApply(context::filelist, MwNratio, 2, NULL);
       },
       fullpaths);
 
