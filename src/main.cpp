@@ -18,10 +18,6 @@ MwWidget context::window, context::menu, context::panes, context::filelist,
 static std::string wrap_text(MwWidget widget, std::string str) {
   std::string strbuf;
   std::string strfinal;
-  std::vector<int> chars;
-
-  chars.resize(str.length() * 4);
-  MwUTF8ToUTF32(str.c_str(), chars.data());
 
   int handle_width = MwGetInteger(widget, MwNwidth);
   int last_space = 0, n = 0;
@@ -79,6 +75,8 @@ int main(int argc, char *argv[]) {
 
         auto wrapped_name = wrap_text(context::info, lmao.entry.name);
         auto wrapped_type = wrap_text(context::info, lmao.entry.type());
+
+        printf("%s\n", lmao.entry.mime_type().c_str());
 
         MwVaApply(context::info_name, MwNtext, wrapped_name.c_str(), NULL);
         MwVaApply(context::info_type, MwNtext, wrapped_type.c_str(), NULL);

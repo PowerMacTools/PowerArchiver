@@ -16,18 +16,24 @@ public:
     bool is_dir = false;
 
     const std::string &type();
+    const std::string &mime_type();
 
     void set_type(std::string type);
     void set_type_function(std::function<std::string()> resolve);
+    void set_mime_type(std::string type);
+    void set_mime_type_function(std::function<std::string()> resolve);
 
   private:
     std::function<std::string()> resolve_type;
+    std::function<std::string()> resolve_mime_type;
     std::optional<std::string> cached_type;
+    std::optional<std::string> cached_mime_type;
   };
 
   static Format *from_file(std::filesystem::path path);
 
   static std::string file_type(const void *data, std::size_t size);
+  static std::string mime_type(const void *data, std::size_t size);
 
   virtual ~Format() = default;
 

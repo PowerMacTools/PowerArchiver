@@ -84,6 +84,31 @@ static std::string entry_type(const ost_archive_handle *handle,
   ost_decompressed_free(&data);
   return type;
 }
+static std::string entry_type_mime(const ost_archive_handle *handle,
+                                   const ost_entry *ent) {
+  if (!ent->data_fork.present) {
+    return ent->resource_fork.present ? "resource fork only" : "empty";
+  }
+  if (ent->data_fork.encrypted) {
+    return "encrypted";
+  }
+
+  // most file formats have their "file magic" within this number of bytes
+  static constexpr uint64_t type_prefix_size = 1024 * 16;
+
+  ost_decompressed data = {};
+  ost_status status =
+      decompress_n_bytes(ost_archive_handle_archive(handle), &ent->data_fork,
+                         type_prefix_size, &data);
+  if (status != OST_OK) {
+    ost_decompressed_free(&data);
+    return std::string("unreadable (") + ost_status_string(status) + ")";
+  }
+
+  std::string type = Format::mime_type(data.data, data.size);
+  ost_decompressed_free(&data);
+  return type;
+}
 
 std::vector<Format::Entry> StuffitFormat::files() {
   std::vector<Entry> root;
@@ -112,6 +137,9 @@ std::vector<Format::Entry> StuffitFormat::files() {
           } else {
             leaf.set_type_function(
                 [handle = handle, ent] { return entry_type(handle, ent); });
+            leaf.set_mime_type_function([handle = handle, ent] {
+              return entry_type_mime(handle, ent);
+            });
           }
         }
         break;
