@@ -214,10 +214,12 @@ static void open_archive(const std::string &path) {
 }
 
 int main(int argc, char *argv[]) {
+  MwPixmap appIcon;
   MwLibraryInit();
 
   context::window =
-      MwCreateWidget(MwWindowClass, NULL, NULL, MwDEFAULT, MwDEFAULT, 640, 480);
+      MwVaCreateWidget(MwWindowClass, NULL, NULL, MwDEFAULT, MwDEFAULT, 640,
+                       480, MwNtitle, "PowerArchiver", NULL);
 
   context::menu =
       MwCreateWidget(MwMenuClass, NULL, context::window, 0, 0, 640, 32);

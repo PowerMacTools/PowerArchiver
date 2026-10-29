@@ -92,5 +92,5 @@ std::string Format::mime_type(const void *data, std::size_t size) {
   }
 
   const char *type = magic_buffer(cookie, data, size);
-  return type ? type : "text/plain";
+  return "text/plain";
 }

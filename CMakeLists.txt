@@ -47,6 +47,7 @@ foreach(line ${icon_lines})
   string(REGEX MATCH "\"([A-Za-z0-9_.-]+\\.png)\"" _ "${line}")
   list(APPEND used_icons ${CMAKE_MATCH_1})
 endforeach()
+list(APPEND used_icons "PowerArchiver_Icon.png")
 list(REMOVE_DUPLICATES used_icons)
 file(REMOVE_RECURSE ${ICON_DIR})
 foreach(icon ${used_icons})
@@ -55,8 +56,23 @@ foreach(icon ${used_icons})
 endforeach()
 
 if(CMAKE_SYSTEM_NAME MATCHES Retro)
+  # The Finder icon's resources, from a 32x32 PNG
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  set(icon_png ${CMAKE_CURRENT_SOURCE_DIR}/icons/PowerArchiver_Icon.png)
+  set(icon_r ${CMAKE_CURRENT_BINARY_DIR}/icon.r)
+  add_custom_command(
+    OUTPUT ${icon_r}
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/mac_icon.py rez
+            ${icon_png} ${icon_r}
+    DEPENDS ${icon_png} ${CMAKE_CURRENT_SOURCE_DIR}/tools/mac_icon.py
+    COMMENT "Generating icon.r"
+    VERBATIM)
+
+  # the creator code matches the BNDL in marchiver.r
   add_application(${PROJECT_NAME} ${sources}
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/retro/marchiver.r)
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/retro/marchiver.r ${icon_r}
+    CREATOR PwAr)
   target_link_libraries(${PROJECT_NAME} retro_compat)
 else()
   add_executable(${PROJECT_NAME} ${sources})
@@ -97,15 +113,21 @@ else()
       COMMAND ${CMAKE_COMMAND} -E rm -f ${disk}
       COMMAND dd if=/dev/zero of=${disk} bs=1M count=32 status=none
       COMMAND ${HFORMAT} -l ${PROJECT_NAME} ${disk}
-      # hcopy -m unpacks MacBinary, keeping the resource fork
-      COMMAND ${HCOPY} -m ${PROJECT_NAME}.bin :${PROJECT_NAME}
+      # Rez can't set the "has bundle" Finder flag, without which the Finder
+      # ignores the application's icon, so set it in a copy of the MacBinary
+      # file. Only the application gets an icon; the volume keeps the default.
+      # hcopy -m unpacks MacBinary, keeping the resource fork and Finder info.
+      COMMAND ${Python3_EXECUTABLE}
+              ${CMAKE_CURRENT_SOURCE_DIR}/tools/mac_icon.py bundle
+              ${PROJECT_NAME}.bin ${PROJECT_NAME}-bundle.bin
+      COMMAND ${HCOPY} -m ${PROJECT_NAME}-bundle.bin :${PROJECT_NAME}
       COMMAND ${HCOPY} -r ${MAGIC_DATABASE} :magic.mgc
       COMMAND ${HMKDIR} :icons
       ${copy_icons}
       COMMAND ${HUMOUNT}
       # the target orders the build, the file remakes the disk when it changes
       DEPENDS ${PROJECT_NAME}_APPL ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}.bin
-              ${MAGIC_DATABASE}
+              ${MAGIC_DATABASE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/mac_icon.py
       WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
       COMMENT "Making ${PROJECT_NAME}-full.dsk"
       VERBATIM)
