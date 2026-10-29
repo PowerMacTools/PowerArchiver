@@ -7,6 +7,7 @@
 #include <Files.h>
 #include <Finder.h>
 #include <InternetConfig.h>
+#include <Navigation.h>
 #include <cstdlib>
 #include <cstring>
 
@@ -228,6 +229,122 @@ bool set_finder_info(const std::string &path, const std::uint8_t type[4],
     return failed(error, "failed to set Finder info of", path, err);
   }
   return true;
+}
+
+// Navigation Services; loaded at run time, since it only comes with Mac OS 8.5
+// and later.
+struct navigation {
+  OSErr (*get_default_options)(NavDialogOptions *options);
+  OSErr (*get_file)(AEDesc *location, NavReplyRecord *reply,
+                    NavDialogOptions *options, NavEventUPP event,
+                    NavPreviewUPP preview, NavObjectFilterUPP filter,
+                    NavTypeListHandle types, void *user);
+  OSErr (*choose_folder)(AEDesc *location, NavReplyRecord *reply,
+                         NavDialogOptions *options, NavEventUPP event,
+                         NavObjectFilterUPP filter, void *user);
+  OSErr (*dispose_reply)(NavReplyRecord *reply);
+};
+
+// returns Navigation Services or null if it isn't available.
+static navigation *open_navigation() {
+  static navigation nav;
+  static bool loaded = false, tried = false;
+  if (tried) {
+    return loaded ? &nav : nullptr;
+  }
+  tried = true;
+
+  void *lib = MwDynamicOpen("NavigationLib");
+  if (!lib) {
+    return nullptr;
+  }
+  auto can_run = (Boolean (*)())MwDynamicSymbol(lib, "NavServicesCanRun");
+  nav.get_default_options = (decltype(nav.get_default_options))MwDynamicSymbol(
+      lib, "NavGetDefaultDialogOptions");
+  nav.get_file = (decltype(nav.get_file))MwDynamicSymbol(lib, "NavGetFile");
+  nav.choose_folder =
+      (decltype(nav.choose_folder))MwDynamicSymbol(lib, "NavChooseFolder");
+  nav.dispose_reply =
+      (decltype(nav.dispose_reply))MwDynamicSymbol(lib, "NavDisposeReply");
+  loaded = can_run && nav.get_default_options && nav.get_file &&
+           nav.choose_folder && nav.dispose_reply && can_run();
+  return loaded ? &nav : nullptr;
+}
+
+static void set_pstring(Str255 out, const std::string &utf8) {
+  std::string macroman = to_macroman(utf8).substr(0, 255);
+  out[0] = (unsigned char)macroman.size();
+  std::memcpy(out + 1, macroman.data(), macroman.size());
+}
+
+// Builds an FSSpec's full path by walking up its parent directories.
+static bool full_path(const FSSpec &spec, std::string &path) {
+  std::string macroman((const char *)spec.name + 1, spec.name[0]);
+  if (spec.parID == fsRtParID) {
+    // the volume itself
+    macroman += ":";
+  }
+  for (long dir = spec.parID; dir != fsRtParID;) {
+    Str255 name;
+    CInfoPBRec pb = {};
+    pb.dirInfo.ioNamePtr = name;
+    pb.dirInfo.ioVRefNum = spec.vRefNum;
+    pb.dirInfo.ioFDirIndex = -1;
+    pb.dirInfo.ioDrDirID = dir;
+    if (PBGetCatInfoSync(&pb) != noErr) {
+      return false;
+    }
+    macroman = std::string((const char *)name + 1, name[0]) + ":" + macroman;
+    dir = pb.dirInfo.ioDrParID;
+  }
+
+  char *utf8 = MwACPTextToUTF8Text(macroman.c_str());
+  path = utf8;
+  free(utf8);
+  return true;
+}
+
+static choice run_dialog(const std::string &title, bool folder,
+                         std::string &path) {
+  navigation *nav = open_navigation();
+  NavDialogOptions options;
+  if (!nav || nav->get_default_options(&options) != noErr) {
+    return choice::unavailable;
+  }
+  options.dialogOptionFlags &= ~kNavAllowMultipleFiles;
+  options.dialogOptionFlags |= kNavNoTypePopup | kNavDontAutoTranslate;
+  set_pstring(options.windowTitle, title);
+  set_pstring(options.clientName, "PowerArchiver");
+
+  NavReplyRecord reply;
+  OSErr err = folder ? nav->choose_folder(nullptr, &reply, &options, nullptr,
+                                          nullptr, nullptr)
+                     : nav->get_file(nullptr, &reply, &options, nullptr,
+                                     nullptr, nullptr, nullptr, nullptr);
+  if (err != noErr || !reply.validRecord) {
+    if (err == noErr) {
+      nav->dispose_reply(&reply);
+    }
+    return choice::cancelled;
+  }
+
+  FSSpec spec;
+  AEKeyword keyword;
+  DescType type;
+  Size size;
+  bool ok = AEGetNthPtr(&reply.selection, 1, typeFSS, &keyword, &type, &spec,
+                        sizeof spec, &size) == noErr &&
+            full_path(spec, path);
+  nav->dispose_reply(&reply);
+  return ok ? choice::chosen : choice::cancelled;
+}
+
+choice choose_file(const std::string &title, std::string &path) {
+  return run_dialog(title, false, path);
+}
+
+choice choose_folder(const std::string &title, std::string &path) {
+  return run_dialog(title, true, path);
 }
 
 } // namespace fs

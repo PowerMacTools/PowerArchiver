@@ -2,6 +2,7 @@
 
 #include "Mw/Core.h"
 #include "formats/formats.hpp"
+#include "fs/fs.hpp"
 #include "icon.hpp"
 #include <chrono>
 #include <functional>
@@ -122,9 +123,7 @@ static void show_progress() {
   MwAddUserHandler(context::progress_window, MwNcloseHandler, on_cancel, NULL);
 }
 
-static void extract_to(MwWidget handle, void *user, void *call) {
-  const char *dir = (const char *)call;
-
+static void extract_to(const std::string &dir) {
   if (context::extraction) {
     show_message("An extraction is already running.", "Extract",
                  MwMB_ICONERROR);
@@ -280,6 +279,18 @@ int main(int argc, char *argv[]) {
         MwWidget chooser;
 
         if (call == context::open_menu) {
+#ifdef macintosh
+          std::string path;
+          switch (fs::choose_file("Open", path)) {
+          case fs::choice::chosen:
+            open_archive(path);
+            return;
+          case fs::choice::cancelled:
+            return;
+          case fs::choice::unavailable:
+            break;
+          }
+#endif
           chooser = MwFileChooser(context::window, "Open");
           MwSetString(chooser, MwNbackground,
                       MwGetInteger(chooser, MwNdarkTheme)
@@ -300,12 +311,29 @@ int main(int argc, char *argv[]) {
           show_message("No archive is open.", "Extract", MwMB_ICONERROR);
           return;
         }
+#ifdef macintosh
+        std::string dir;
+        switch (fs::choose_folder("Extract to", dir)) {
+        case fs::choice::chosen:
+          extract_to(dir);
+          return;
+        case fs::choice::cancelled:
+          return;
+        case fs::choice::unavailable:
+          break;
+        }
+#endif
         chooser = MwDirectoryChooser(context::window, "Extract to");
         MwSetString(chooser, MwNbackground,
                     MwGetInteger(chooser, MwNdarkTheme)
                         ? MwDefaultDarkBackground
                         : MwDefaultBackground);
-        MwAddUserHandler(chooser, MwNdirectoryChosenHandler, extract_to, NULL);
+        MwAddUserHandler(
+            chooser, MwNdirectoryChosenHandler,
+            +[](MwWidget handle, void *user, void *call) {
+              extract_to((const char *)call);
+            },
+            NULL);
       },
       NULL);
 

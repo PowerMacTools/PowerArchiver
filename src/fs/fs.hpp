@@ -30,6 +30,10 @@ void guess_finder_info(const std::string &path);
 bool set_finder_info(const std::string &path, const std::uint8_t type[4],
                      const std::uint8_t creator[4], std::uint16_t flags,
                      std::string &error);
+
+enum class choice { chosen, cancelled, unavailable };
+choice choose_file(const std::string &title, std::string &path);
+choice choose_folder(const std::string &title, std::string &path);
 #endif
 
 } // namespace fs
