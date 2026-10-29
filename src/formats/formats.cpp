@@ -25,7 +25,7 @@ void Format::Entry::set_type(std::string type) {
   resolve_type = nullptr;
 }
 
-void Format::Entry::set_type(std::function<std::string()> resolve) {
+void Format::Entry::set_type_function(std::function<std::string()> resolve) {
   cached_type.reset();
   resolve_type = std::move(resolve);
 }

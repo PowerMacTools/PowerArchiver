@@ -110,7 +110,7 @@ std::vector<Format::Entry> StuffitFormat::files() {
           if (leaf.is_dir) {
             leaf.set_type("directory");
           } else {
-            leaf.set_type(
+            leaf.set_type_function(
                 [handle = handle, ent] { return entry_type(handle, ent); });
           }
         }

@@ -18,7 +18,7 @@ public:
     const std::string &type();
 
     void set_type(std::string type);
-    void set_type(std::function<std::string()> resolve);
+    void set_type_function(std::function<std::string()> resolve);
 
   private:
     std::function<std::string()> resolve_type;
