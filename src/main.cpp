@@ -35,26 +35,31 @@ std::unique_ptr<Format::Extraction> context::extraction;
 std::string context::extract_dir;
 MwWidget context::progress_window, context::progress_bar;
 
-static std::string wrap_text(MwWidget widget, std::string str) {
+static std::string wrap_text(MwWidget widget, std::string str, int width = -1) {
   std::string strbuf;
   std::string strfinal;
 
-  int handle_width = MwGetInteger(widget, MwNwidth);
-  int last_space = 0, n = 0;
+  int handle_width = width >= 0 ? width : MwGetInteger(widget, MwNwidth);
   for (auto ch : str) {
-    n++;
-    if (ch == ' ') {
-      last_space = n - 1;
-      if (last_space > strbuf.size()) {
-        last_space = strbuf.size() - 1;
-      }
+    if (ch == '\n') {
+      strfinal += strbuf + "\n";
+      strbuf.clear();
+      continue;
     }
     strbuf += ch;
-    auto placeholder = MwTextWidth(widget, NULL, strbuf.c_str());
-    if (placeholder > handle_width - 3) {
-      strfinal += strbuf.substr(0, last_space);
-      strfinal += "\n";
-      strbuf = strbuf.substr(last_space);
+    if (strbuf.size() < 2 ||
+        MwTextWidth(widget, NULL, strbuf.c_str()) <= handle_width - 3) {
+      continue;
+    }
+
+    // break at the line's last space, or mid-word if it has none
+    size_t space = strbuf.find_last_of(' ');
+    if (space == std::string::npos || space == 0) {
+      strfinal += strbuf.substr(0, strbuf.size() - 1) + "\n";
+      strbuf = strbuf.substr(strbuf.size() - 1);
+    } else {
+      strfinal += strbuf.substr(0, space) + "\n";
+      strbuf = strbuf.substr(space + 1);
     }
   }
   strfinal += strbuf;
@@ -64,8 +69,10 @@ static std::string wrap_text(MwWidget widget, std::string str) {
 
 static void show_message(const std::string &text, const char *title,
                          unsigned int icon) {
-  MwWidget msgbox =
-      MwMessageBox(context::window, text.c_str(), title, icon | MwMB_BUTTONOK);
+  static constexpr int label_width = 512 - (8 + 48 + 8) - 8;
+  std::string wrapped = wrap_text(context::window, text, label_width);
+  MwWidget msgbox = MwMessageBox(context::window, wrapped.c_str(), title,
+                                 icon | MwMB_BUTTONOK);
   auto close = +[](MwWidget handle, void *user, void *call) {
     MwDestroyWidget((MwWidget)user);
   };
@@ -173,7 +180,8 @@ static void populate_treeview(void *parent,
   for (auto &entry : files) {
     context l;
 
-    void *p = MwTreeViewAdd(context::filelist, parent, NULL, entry.name.c_str());
+    void *p =
+        MwTreeViewAdd(context::filelist, parent, NULL, entry.name.c_str());
     l.entry = entry;
     context::entries.insert_or_assign(p, l);
     if (entry.is_dir) {
@@ -295,8 +303,7 @@ int main(int argc, char *argv[]) {
                     MwGetInteger(chooser, MwNdarkTheme)
                         ? MwDefaultDarkBackground
                         : MwDefaultBackground);
-        MwAddUserHandler(chooser, MwNdirectoryChosenHandler, extract_to,
-                         NULL);
+        MwAddUserHandler(chooser, MwNdirectoryChosenHandler, extract_to, NULL);
       },
       NULL);
 
