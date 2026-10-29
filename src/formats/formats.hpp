@@ -11,11 +11,10 @@ public:
   class Entry {
   public:
     std::string name;
+    std::string full_path;
     std::vector<Entry> entries;
     bool is_dir = false;
 
-    // Human readable file type. It's worked out the first time this is
-    // called, so the Format that produced this entry must still be alive.
     const std::string &type();
 
     void set_type(std::string type);
@@ -28,7 +27,6 @@ public:
 
   static Format *from_file(std::filesystem::path path);
 
-  // Describe the contents of `data` using libmagic.
   static std::string file_type(const void *data, std::size_t size);
 
   virtual ~Format() = default;
