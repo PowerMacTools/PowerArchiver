@@ -1,4 +1,5 @@
 #include "icon.hpp"
+#include "fs/fs.hpp"
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -2057,7 +2058,7 @@ static std::vector<std::pair<std::string, std::vector<std::string>>>
 
 void setup_pixmap_table(MwWidget handle) {
   for (auto &[file, mime_types] : icon_files) {
-    std::string path = std::string(MARCHIVER_ICON_DIR "/") + file;
+    std::string path = fs::join(MARCHIVER_ICON_DIR, file);
     MwPixmap pixmap = MwLoadImage(handle, path.c_str());
 
     for (auto &mime_type : mime_types)

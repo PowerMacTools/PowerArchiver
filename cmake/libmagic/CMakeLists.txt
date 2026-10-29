@@ -35,6 +35,12 @@ foreach(func asctime_r asprintf ctime_r dprintf fmtcheck fork freelocale
   string(TOUPPER "HAVE_${func}" var)
   check_symbol_exists(${func} "${func_headers}" ${var})
 endforeach()
+if(CMAKE_SYSTEM_NAME MATCHES Retro)
+  # Retro68 declares these but classic Mac OS has no processes to run
+  # external decompressors in.
+  set(HAVE_FORK OFF)
+  set(HAVE_POSIX_SPAWNP OFF)
+endif()
 set(HAVE_DECL_FORK ${HAVE_FORK})
 check_symbol_exists(getopt_long getopt.h HAVE_GETOPT_LONG)
 check_symbol_exists(major sys/sysmacros.h HAVE_MAJOR)
@@ -63,6 +69,10 @@ set(magic_sources
   is_csv.c is_json.c is_simh.c is_tar.c readelf.c print.c fsmagic.c funcs.c
   apptype.c der.c cdf.c cdf_time.c readcdf.c swap.c)
 list(TRANSFORM magic_sources PREPEND ${FILE_DIR}/src/)
+if(CMAKE_SYSTEM_NAME MATCHES Retro)
+  list(REMOVE_ITEM magic_sources ${FILE_DIR}/src/der.c)
+  list(APPEND magic_sources ${CMAKE_CURRENT_SOURCE_DIR}/der_stub.c)
+endif()
 
 # Replacements for functions the platform lacks.
 foreach(func asctime_r asprintf ctime_r dprintf fmtcheck getline gmtime_r
@@ -80,15 +90,38 @@ target_include_directories(magic
   PUBLIC ${gen_dir}
   PRIVATE ${FILE_DIR}/src)
 target_link_libraries(magic PRIVATE m)
-
-set(file_sources ${FILE_DIR}/src/file.c)
-if(NOT HAVE_GETOPT_LONG)
-  list(APPEND file_sources ${FILE_DIR}/src/missing/getopt_long.c)
+if(TARGET retro_compat_headers)
+  target_link_libraries(magic PRIVATE retro_compat_headers)
 endif()
-add_executable(file ${file_sources})
-target_compile_definitions(file PRIVATE HAVE_CONFIG_H)
-target_include_directories(file PRIVATE ${FILE_DIR}/src)
-target_link_libraries(file PRIVATE magic)
+
+# The database is compiled by running `file`, so a cross build needs one built
+# for the host from this same source, e.g. by a native build of this project.
+if(CMAKE_CROSSCOMPILING)
+  set(default_host_file ${PROJECT_SOURCE_DIR}/build/cmake/libmagic/file)
+  if(NOT EXISTS ${default_host_file})
+    set(default_host_file "")
+  endif()
+  set(MAGIC_HOST_FILE "${default_host_file}" CACHE FILEPATH
+    "`file` built for the host from submodules/file, to compile magic.mgc")
+  if(NOT MAGIC_HOST_FILE)
+    message(FATAL_ERROR "Cross compiling needs a host `file` to compile the "
+      "magic database. Do a native build first (in build/), or set "
+      "MAGIC_HOST_FILE.")
+  endif()
+  set(file_command ${MAGIC_HOST_FILE})
+  set(file_depends)
+else()
+  set(file_sources ${FILE_DIR}/src/file.c)
+  if(NOT HAVE_GETOPT_LONG)
+    list(APPEND file_sources ${FILE_DIR}/src/missing/getopt_long.c)
+  endif()
+  add_executable(file ${file_sources})
+  target_compile_definitions(file PRIVATE HAVE_CONFIG_H)
+  target_include_directories(file PRIVATE ${FILE_DIR}/src)
+  target_link_libraries(file PRIVATE magic)
+  set(file_command file)
+  set(file_depends file)
+endif()
 
 # Compile the magic database. `file -C -m magic` writes magic.mgc next to
 # the input directory.
@@ -101,10 +134,10 @@ add_custom_command(
   COMMAND ${CMAKE_COMMAND} -E make_directory magic
   COMMAND ${CMAKE_COMMAND} -E copy ${FILE_DIR}/magic/Header
           ${FILE_DIR}/magic/Localstuff ${magic_fragments} magic
-  COMMAND file -C -m magic
+  COMMAND ${file_command} -C -m magic
   COMMAND ${CMAKE_COMMAND} -E rm -rf magic
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-  DEPENDS file ${magic_fragments}
+  DEPENDS ${file_depends} ${magic_fragments}
   COMMENT "Compiling magic database"
   VERBATIM)
 add_custom_target(magic_database DEPENDS ${MAGIC_DATABASE})

@@ -1,24 +1,35 @@
 #include "stuffit.hpp"
+#include "../fs/fs.hpp"
 #include "formats.hpp"
 
+#include <memory>
 #include <openstuffit/openstuffit.h>
-#include <stdexcept>
 #include <string>
+#include <tuple>
 
 extern "C" {
 #include <ost_decompress.h>
 }
 
-StuffitFormat::StuffitFormat(std::filesystem::path path) {
+StuffitFormat *StuffitFormat::open(const std::string &path,
+                                   std::string &error) {
+  std::unique_ptr<StuffitFormat> format(new StuffitFormat);
+  if (!fs::read_file(path, format->data, error)) {
+    return nullptr;
+  }
+
   ost_parse_options options;
   ost_parse_options_init(&options);
 
-  ost_status status =
-      ost_archive_handle_open_file(path.c_str(), &options, &handle);
+  // the name helps it recognize wrappers like .sea and .hqx
+  ost_status status = ost_archive_handle_open_buffer(
+      (const uint8_t *)format->data.data.get(), format->data.size,
+      fs::name(path).c_str(), &options, &format->handle);
   if (status != OST_OK) {
-    throw std::runtime_error("failed to open " + path.string() + ": " +
-                             ost_status_string(status));
+    error = "failed to open " + path + ": " + ost_status_string(status);
+    return nullptr;
   }
+  return format.release();
 }
 
 StuffitFormat::~StuffitFormat() { ost_archive_handle_free(handle); }
@@ -158,11 +169,71 @@ std::vector<Format::Entry> StuffitFormat::files() {
   return root;
 }
 
+#ifdef macintosh
+
+// A decompressed fork, freed when it goes out of scope.
+struct fork_data : ost_decompressed {
+  fork_data() : ost_decompressed() {}
+  ~fork_data() { ost_decompressed_free(this); }
+};
+
+// Decompresses one fork of ent. Encrypted forks are unsupported too.
+static ost_status decompress(const ost_archive *archive,
+                             const ost_fork_info &fork, fork_data &out) {
+  if (fork.encrypted) {
+    return OST_ERR_UNSUPPORTED;
+  }
+  return ost_decompress_fork(ost_archive_data(archive),
+                             ost_archive_data_size(archive), &fork, &out);
+}
+
+// Writes ent to target as a real Mac file, with both forks and its Finder
+// info. Sets unsupported, and writes nothing, if openstuffit can't decompress
+// it.
+static bool extract_file(const ost_archive *archive, const ost_entry *ent,
+                         const std::string &target, bool &unsupported,
+                         std::string &error) {
+  fork_data data, rsrc;
+  for (auto [present, fork, out] :
+       {std::make_tuple(ent->data_fork.present, &ent->data_fork, &data),
+        std::make_tuple(ent->resource_fork.present, &ent->resource_fork,
+                        &rsrc)}) {
+    ost_status status = present ? decompress(archive, *fork, *out) : OST_OK;
+    if (status == OST_ERR_UNSUPPORTED) {
+      unsupported = true;
+      return true;
+    }
+    if (status != OST_OK) {
+      error = ost_status_string(status);
+      return false;
+    }
+  }
+
+  if (!fs::create_directories(fs::parent(target), error)) {
+    return false;
+  }
+  FILE *file = fs::open(target, "wb");
+  if (!file) {
+    error = "failed to create " + target;
+    return false;
+  }
+  bool written = fwrite(data.data, 1, data.size, file) == data.size;
+  if (fclose(file) != 0 || !written) {
+    error = "failed to write " + target;
+    return false;
+  }
+  return (!ent->resource_fork.present ||
+          fs::write_resource_fork(target, rsrc.data, rsrc.size, error)) &&
+         fs::set_finder_info(target, ent->file_type, ent->creator,
+                             ent->finder_flags, error);
+}
+
+#endif
+
 class StuffitExtraction : public Format::Extraction {
 public:
-  StuffitExtraction(const ost_archive_handle *handle,
-                    const std::filesystem::path &dir)
-      : handle(handle), output_dir(dir.string()),
+  StuffitExtraction(const ost_archive_handle *handle, const std::string &dir)
+      : handle(handle), output_dir(dir),
         count(ost_archive_handle_entry_count(handle)) {}
 
   bool step() override {
@@ -176,18 +247,27 @@ public:
 
     // A directory's path would select everything inside it too, so create
     // directories here rather than through openstuffit.
-    if (ent->is_dir) {
-      std::filesystem::path relative =
-          std::filesystem::path(ent->path).relative_path();
-      for (const auto &part : relative) {
-        if (part == "..") {
-          throw std::runtime_error(std::string("unsafe path: ") + ent->path);
-        }
-      }
-      std::filesystem::create_directories(std::filesystem::path(output_dir) /
-                                          relative);
-      return true;
+    std::string target, error;
+    if (!fs::join_member(output_dir, ent->path, target, error)) {
+      return fail(error);
     }
+    if (ent->is_dir) {
+      return fs::create_directories(target, error) || fail(error);
+    }
+
+#ifdef macintosh
+    // openstuffit writes files with POSIX paths and can't store resource
+    // forks natively here, so do it ourselves.
+    bool is_unsupported = false;
+    if (!extract_file(ost_archive_handle_archive(handle), ent, target,
+                      is_unsupported, error)) {
+      return fail(std::string("failed to extract ") + ent->path + ": " +
+                  error);
+    }
+    if (is_unsupported) {
+      unsupported.push_back(ent->path);
+    }
+#else
 
     const char *include_paths[] = {ent->path};
     ost_extract_options options = {};
@@ -214,9 +294,10 @@ public:
       return true;
     }
     if (status != OST_OK) {
-      throw std::runtime_error(std::string("failed to extract ") + ent->path +
-                               ": " + ost_status_string(status));
+      return fail(std::string("failed to extract ") + ent->path + ": " +
+                  ost_status_string(status));
     }
+#endif
     return true;
   }
 
@@ -232,6 +313,6 @@ private:
 };
 
 std::unique_ptr<Format::Extraction>
-StuffitFormat::extract(const std::filesystem::path &dir) {
+StuffitFormat::extract(const std::string &dir) {
   return std::make_unique<StuffitExtraction>(handle, dir);
 }

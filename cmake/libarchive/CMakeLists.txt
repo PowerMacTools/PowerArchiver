@@ -50,8 +50,19 @@ set(XZ_TOOL_SCRIPTS OFF)
 set(XZ_DOC OFF)
 set(XZ_NLS OFF)
 set(XZ_THREADS no CACHE STRING "" FORCE)
+if(CMAKE_SYSTEM_NAME MATCHES Retro)
+  # Classic Mac OS has no way for tuklib to count cores or memory, which xz
+  # treats as a configure error. Claim they were found with no definitions so
+  # lzma_cputhreads() and lzma_physmem() just report 0.
+  set(TUKLIB_CPUCORES_FOUND 1 CACHE INTERNAL "")
+  set(TUKLIB_PHYSMEM_FOUND 1 CACHE INTERNAL "")
+endif()
 add_subdirectory(${SUBMODULES}/xz ${CMAKE_CURRENT_BINARY_DIR}/xz
   EXCLUDE_FROM_ALL)
+# xz only exports its headers through its install rules, so without this
+# libarchive silently picks up the system's lzma.h instead
+target_include_directories(liblzma INTERFACE
+  $<BUILD_INTERFACE:${SUBMODULES}/xz/src/liblzma/api>)
 
 # zstd: zstd, zip/7z zstd.
 set(ZSTD_DIR ${SUBMODULES}/zstd/lib)
@@ -100,6 +111,22 @@ endforeach()
 set(POSIX_REGEX_LIB NONE CACHE STRING "" FORCE)
 add_subdirectory(${SUBMODULES}/libarchive ${CMAKE_CURRENT_BINARY_DIR}/libarchive
   EXCLUDE_FROM_ALL)
+
+# We only read archives and extract them to disk, so leave out reading from
+# disk and every archive writer. Those are also the parts that need POSIX
+# directory and timezone APIs classic Mac OS doesn't have.
+get_target_property(archive_sources archive_static SOURCES)
+list(FILTER archive_sources EXCLUDE REGEX
+  "archive_(read_disk|write_set_format|write_add_filter)[^/]*\\.c$")
+set_property(TARGET archive_static PROPERTY SOURCES ${archive_sources})
+
+if(CMAKE_SYSTEM_NAME MATCHES Retro)
+  # xxhash.c types U32 as uint32_t under C99, but its header declares the
+  # same functions with unsigned int. Retro68's uint32_t is unsigned long, so
+  # build it as C89, where it uses unsigned int too.
+  set_source_files_properties(${SUBMODULES}/libarchive/libarchive/xxhash.c
+    TARGET_DIRECTORY archive_static PROPERTIES COMPILE_OPTIONS -std=gnu89)
+endif()
 
 target_compile_definitions(archive_static PRIVATE
   HAVE_LIBZ=1 HAVE_ZLIB_H=1

@@ -1,22 +1,17 @@
 #include "formats.hpp"
+#include "../fs/fs.hpp"
 #include "libarchive.hpp"
 #include "stuffit.hpp"
-#include <filesystem>
 #include <magic.h>
-#include <stdexcept>
 #include <string>
 
-Format *Format::from_file(std::filesystem::path path) {
-  try {
-    return new LibarchiveFormat(path);
-  } catch (const std::exception &) {
-    try {
-      return new StuffitFormat(path);
-    } catch (const std::exception &) {
-      return nullptr;
-    }
+Format *Format::from_file(const std::string &path, std::string &error) {
+  if (Format *format = LibarchiveFormat::open(path, error)) {
+    return format;
   }
-  return nullptr;
+  // libarchive covers far more formats, so its reason is the one to report
+  std::string stuffit_error;
+  return StuffitFormat::open(path, stuffit_error);
 }
 
 const std::string &Format::Entry::type() {
@@ -55,29 +50,48 @@ void Format::Entry::set_mime_type_function(
   resolve_mime_type = std::move(resolve);
 }
 
-std::string Format::file_type(const void *data, std::size_t size) {
-  static magic_t cookie = [] {
-    magic_t cookie = magic_open(MAGIC_NONE);
-    if (cookie && magic_load(cookie, MARCHIVER_MAGIC_DATABASE) != 0) {
-      magic_close(cookie);
-      cookie = nullptr;
-    }
-    return cookie;
+// Why the magic database couldn't be loaded, if it couldn't.
+static std::string magic_problem;
+
+// magic_load() needs stat(), which classic Mac OS lacks, so read the database
+// ourselves and load it from memory. libmagic keeps pointing into the buffer,
+// so it lives as long as the program.
+static magic_t open_magic(int flags) {
+  static const fs::buffer database = [] {
+    fs::buffer data;
+    fs::read_file(MARCHIVER_MAGIC_DATABASE, data, magic_problem);
+    return data;
   }();
+
+  magic_t cookie = magic_open(flags);
+  void *buffer = database.data.get();
+  size_t size = database.size;
+  if (cookie && magic_load_buffers(cookie, &buffer, &size, 1) != 0) {
+    if (magic_problem.empty()) {
+      const char *error = magic_error(cookie);
+      magic_problem = error ? error : "failed to load the magic database";
+    }
+    magic_close(cookie);
+    cookie = nullptr;
+  }
+  return cookie;
+}
+
+std::string Format::file_type(const void *data, std::size_t size) {
+  static magic_t cookie = open_magic(MAGIC_NONE);
+  if (!cookie) {
+    return "unknown (" + magic_problem + ")";
+  }
 
   const char *type = magic_buffer(cookie, data, size);
   return type ? type : "unknown";
 }
 
 std::string Format::mime_type(const void *data, std::size_t size) {
-  static magic_t cookie = [] {
-    magic_t cookie = magic_open(MAGIC_MIME_TYPE);
-    if (cookie && magic_load(cookie, MARCHIVER_MAGIC_DATABASE) != 0) {
-      magic_close(cookie);
-      cookie = nullptr;
-    }
-    return cookie;
-  }();
+  static magic_t cookie = open_magic(MAGIC_MIME_TYPE);
+  if (!cookie) {
+    return "text/plain";
+  }
 
   const char *type = magic_buffer(cookie, data, size);
   return type ? type : "text/plain";

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(marchiver LANGUAGES C CXX OBJC)
+project(PowerArchiver LANGUAGES C CXX)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 17)
@@ -10,13 +10,18 @@ set(MW_BUILD_SHARED OFF)
 set(MW_BUILD_STATIC ON)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/submodules/milsko)
 
-# libarchive and its dependencies, all statically linked from submodules.
+if(CMAKE_SYSTEM_NAME MATCHES Retro)
+  add_subdirectory(src/retro)
+endif()
+
 add_subdirectory(cmake/libarchive)
 
 # openstuffit only ships a Makefile, so build its library sources here.
-# openstuffit.c is the CLI's main() and is left out.
+# openstuffit.c is the CLI's main() and ost_write.c only creates archives, so
+# both are left out.
 set(OPENSTUFFIT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/submodules/openstuffit)
 file(GLOB openstuffit_sources ${OPENSTUFFIT_DIR}/src/ost_*.c)
+list(REMOVE_ITEM openstuffit_sources ${OPENSTUFFIT_DIR}/src/ost_write.c)
 add_library(openstuffit STATIC ${openstuffit_sources})
 set_target_properties(openstuffit PROPERTIES C_STANDARD 99)
 target_compile_definitions(openstuffit PRIVATE _FILE_OFFSET_BITS=64)
@@ -24,6 +29,9 @@ target_include_directories(openstuffit
   PUBLIC ${OPENSTUFFIT_DIR}/include
   PRIVATE ${OPENSTUFFIT_DIR}/src)
 target_link_libraries(openstuffit PUBLIC zlib)
+if(TARGET retro_compat_headers)
+  target_link_libraries(openstuffit PRIVATE retro_compat_headers)
+endif()
 
 add_subdirectory(cmake/libmagic)
 
@@ -46,12 +54,61 @@ foreach(icon ${used_icons})
     COPYONLY)
 endforeach()
 
-add_executable(${PROJECT_NAME} ${sources})
+if(CMAKE_SYSTEM_NAME MATCHES Retro)
+  add_application(${PROJECT_NAME} ${sources}
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/retro/marchiver.r)
+  target_link_libraries(${PROJECT_NAME} retro_compat)
+else()
+  add_executable(${PROJECT_NAME} ${sources})
+endif()
+
+target_compile_options(${PROJECT_NAME} PRIVATE -fno-exceptions)
 
 # ost_decompress.h isn't part of openstuffit's public headers.
 target_include_directories(${PROJECT_NAME} PRIVATE ${OPENSTUFFIT_DIR}/src)
-target_compile_definitions(${PROJECT_NAME}
-  PRIVATE MARCHIVER_MAGIC_DATABASE="${MAGIC_DATABASE}"
-          MARCHIVER_ICON_DIR="${ICON_DIR}")
 target_link_libraries(${PROJECT_NAME} Mw openstuffit magic archive_static)
 add_dependencies(${PROJECT_NAME} magic_database)
+
+if(NOT CMAKE_SYSTEM_NAME MATCHES Retro)
+  target_compile_definitions(${PROJECT_NAME}
+    PRIVATE MARCHIVER_MAGIC_DATABASE="${MAGIC_DATABASE}"
+            MARCHIVER_ICON_DIR="${ICON_DIR}")
+else()
+  target_compile_definitions(${PROJECT_NAME}
+    PRIVATE MARCHIVER_MAGIC_DATABASE=":magic.mgc"
+            MARCHIVER_ICON_DIR=":icons")
+
+  find_program(HFORMAT hformat)
+  find_program(HMOUNT hmount)
+  find_program(HCOPY hcopy)
+  find_program(HMKDIR hmkdir)
+  find_program(HUMOUNT humount)
+  if(HFORMAT AND HMOUNT AND HCOPY AND HMKDIR AND HUMOUNT)
+    set(disk ${CMAKE_CURRENT_BINARY_DIR}/PowerArchiver.dsk)
+    set(copy_icons)
+    foreach(icon ${used_icons})
+      list(APPEND copy_icons
+        COMMAND ${HCOPY} -r ${ICON_DIR}/${icon} :icons:${icon})
+    endforeach()
+    add_custom_command(
+      OUTPUT ${disk}
+      COMMAND ${CMAKE_COMMAND} -E rm -f ${disk}
+      COMMAND dd if=/dev/zero of=${disk} bs=1M count=32 status=none
+      COMMAND ${HFORMAT} -l PowerArchiver ${disk}
+      # hcopy -m unpacks MacBinary, keeping the resource fork
+      COMMAND ${HCOPY} -m ${PROJECT_NAME}.bin :${PROJECT_NAME}
+      COMMAND ${HCOPY} -r ${MAGIC_DATABASE} :magic.mgc
+      COMMAND ${HMKDIR} :icons
+      ${copy_icons}
+      COMMAND ${HUMOUNT}
+      # the target orders the build, the file remakes the disk when it changes
+      DEPENDS ${PROJECT_NAME}_APPL ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}.bin
+              ${MAGIC_DATABASE}
+      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+      COMMENT "Making PowerArchiver.dsk"
+      VERBATIM)
+    add_custom_target(disk_image ALL DEPENDS ${disk})
+  else()
+    message(STATUS "hfsutils not found, so no disk image will be made")
+  endif()
+endif()

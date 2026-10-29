@@ -14,7 +14,12 @@ struct context {
   Format::Entry entry;
   static MwWidget window, menu, panes, filelist;
   static MwWidget table, table_name, table_type, table_icon;
-  static MwMenu extract_menu;
+  static MwMenu open_menu, extract_menu;
+
+  // The open archive, and its tree view items' entries.
+  static std::unique_ptr<Format> format;
+  static std::unordered_map<void *, context> entries;
+
   static std::unique_ptr<Format::Extraction> extraction;
   static std::string extract_dir;
   static MwWidget progress_window, progress_bar;
@@ -23,7 +28,9 @@ struct context {
 MwWidget context::window, context::menu, context::panes, context::filelist;
 MwWidget context::table, context::table_name, context::table_type,
     context::table_icon;
-MwMenu context::extract_menu;
+MwMenu context::open_menu, context::extract_menu;
+std::unique_ptr<Format> context::format;
+std::unordered_map<void *, context> context::entries;
 std::unique_ptr<Format::Extraction> context::extraction;
 std::string context::extract_dir;
 MwWidget context::progress_window, context::progress_bar;
@@ -109,7 +116,6 @@ static void show_progress() {
 }
 
 static void extract_to(MwWidget handle, void *user, void *call) {
-  Format *format = (Format *)user;
   const char *dir = (const char *)call;
 
   if (context::extraction) {
@@ -117,12 +123,7 @@ static void extract_to(MwWidget handle, void *user, void *call) {
                  MwMB_ICONERROR);
     return;
   }
-  try {
-    context::extraction = format->extract(dir);
-  } catch (const std::exception &e) {
-    show_message(e.what(), "Extract", MwMB_ICONERROR);
-    return;
-  }
+  context::extraction = context::format->extract(dir);
   context::extract_dir = dir;
   show_progress();
   // tick often while extracting, leaving the event loop a short gap between
@@ -139,19 +140,19 @@ static void extract_tick(MwWidget handle, void *user, void *call) {
   }
 
   auto start = clock::now();
-  try {
-    bool more = true;
-    while (more && clock::now() - start < budget) {
-      more = context::extraction->step();
-    }
-    if (more) {
-      MwSetInteger(context::progress_bar, MwNvalue,
-                   (int)(context::extraction->progress() * 100));
-      return;
-    }
-  } catch (const std::exception &e) {
+  bool more = true;
+  while (more && clock::now() - start < budget) {
+    more = context::extraction->step();
+  }
+  if (more) {
+    MwSetInteger(context::progress_bar, MwNvalue,
+                 (int)(context::extraction->progress() * 100));
+    return;
+  }
+  if (!context::extraction->error().empty()) {
+    std::string error = context::extraction->error();
     stop_extraction();
-    show_message(e.what(), "Extract", MwMB_ICONERROR);
+    show_message(error, "Extract", MwMB_ICONERROR);
     return;
   }
 
@@ -167,16 +168,45 @@ static void extract_tick(MwWidget handle, void *user, void *call) {
                skipped.empty() ? MwMB_ICONINFO : MwMB_ICONWARNING);
 }
 
+static void populate_treeview(void *parent,
+                              const std::vector<Format::Entry> &files) {
+  for (auto &entry : files) {
+    context l;
+
+    void *p = MwTreeViewAdd(context::filelist, parent, NULL, entry.name.c_str());
+    l.entry = entry;
+    context::entries.insert_or_assign(p, l);
+    if (entry.is_dir) {
+      if (parent)
+        MwTreeViewSetOpened(context::filelist, p, MwFALSE);
+      populate_treeview(p, entry.entries);
+    }
+  }
+}
+
+static void open_archive(const std::string &path) {
+  std::string error;
+  std::unique_ptr<Format> format(Format::from_file(path, error));
+  if (!format) {
+    show_message(error, "Open", MwMB_ICONERROR);
+    return;
+  }
+
+  // an extraction in progress reads from the old archive
+  stop_extraction();
+  context::format = std::move(format);
+  MwTreeViewReset(context::filelist);
+  context::entries.clear();
+  // the selection's details belonged to the old archive
+  MwVaApply(context::table_name, MwNtext, "", NULL);
+  MwVaApply(context::table_type, MwNtext, "", NULL);
+  MwVaApply(context::table_icon, MwNpixmap, NULL, NULL);
+  populate_treeview(NULL, context::format->files());
+  MwForceRender(context::window);
+}
+
 int main(int argc, char *argv[]) {
-  Format *format = NULL;
-  const char *filename = (argc >= 2) ? argv[1] : "";
-
-  std::unordered_map<void *, context> *fullpaths =
-      new std::unordered_map<void *, context>();
-
   MwLibraryInit();
-
-  format = Format::from_file(filename);
 
   context::window =
       MwCreateWidget(MwWindowClass, NULL, NULL, MwDEFAULT, MwDEFAULT, 640, 480);
@@ -193,8 +223,11 @@ int main(int argc, char *argv[]) {
   MwAddUserHandler(
       context::filelist, MwNtreeViewActivateHandler,
       +[](MwWidget handle, void *user, void *call) {
-        std::unordered_map<void *, context> *entries = (decltype(entries))user;
-        context lmao = entries->at(call);
+        auto found = context::entries.find(call);
+        if (found == context::entries.end()) {
+          return;
+        }
+        context &lmao = found->second;
         std::string wrapped_name, wrapped_type;
         MwPixmap icon = NULL;
 
@@ -210,7 +243,7 @@ int main(int argc, char *argv[]) {
         MwVaApply(context::table_type, MwNtext, wrapped_type.c_str(), NULL);
         MwForceRender(context::window);
       },
-      fullpaths);
+      NULL);
 
   context::table = MwVaCreateWidget(MwTableClass, NULL, context::panes, 0, 32,
                                     640, 480, MwNcolumns, 2, MwNratio, 1, NULL);
@@ -228,18 +261,32 @@ int main(int argc, char *argv[]) {
 
   MwAddUserHandler(context::window, MwNtickHandler, extract_tick, NULL);
 
+  context::open_menu = MwMenuAdd(context::menu, NULL, "Open");
   context::extract_menu = MwMenuAdd(context::menu, NULL, "Extract");
   MwMenuAdd(context::menu, NULL, "Find");
   MwAddUserHandler(
       context::menu, MwNmenuHandler,
       +[](MwWidget handle, void *user, void *call) {
-        Format *format = (Format *)user;
         MwWidget chooser;
 
+        if (call == context::open_menu) {
+          chooser = MwFileChooser(context::window, "Open");
+          MwSetString(chooser, MwNbackground,
+                      MwGetInteger(chooser, MwNdarkTheme)
+                          ? MwDefaultDarkBackground
+                          : MwDefaultBackground);
+          MwAddUserHandler(
+              chooser, MwNfileChosenHandler,
+              +[](MwWidget handle, void *user, void *call) {
+                open_archive((const char *)call);
+              },
+              NULL);
+          return;
+        }
         if (call != context::extract_menu) {
           return;
         }
-        if (!format) {
+        if (!context::format) {
           show_message("No archive is open.", "Extract", MwMB_ICONERROR);
           return;
         }
@@ -249,30 +296,13 @@ int main(int argc, char *argv[]) {
                         ? MwDefaultDarkBackground
                         : MwDefaultBackground);
         MwAddUserHandler(chooser, MwNdirectoryChosenHandler, extract_to,
-                         format);
+                         NULL);
       },
-      format);
+      NULL);
 
-  if (format) {
-    std::function<void(MwWidget widget, void *parent,
-                       std::vector<Format::Entry> files, int indent)>
-        populate_treeview = [&](MwWidget widget, void *parent,
-                                std::vector<Format::Entry> files,
-                                int indent) -> void {
-      for (auto entry : files) {
-        context l;
-
-        void *p = MwTreeViewAdd(widget, parent, NULL, entry.name.c_str());
-        l.entry = entry;
-        fullpaths->insert_or_assign(p, l);
-        if (entry.is_dir) {
-          if (parent)
-            MwTreeViewSetOpened(widget, p, MwFALSE);
-          populate_treeview(widget, p, entry.entries, indent + 1);
-        }
-      }
-    };
-    populate_treeview(context::filelist, NULL, format->files(), 0);
+  // classic Mac OS has no command line, so there it's Open or nothing
+  if (argc >= 2) {
+    open_archive(argv[1]);
   }
 
   MwLoop(context::window);

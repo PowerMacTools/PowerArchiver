@@ -6,12 +6,15 @@
 // cpio, iso9660, cab, lha, ar, ...
 class LibarchiveFormat : public Format {
 public:
-  LibarchiveFormat(std::filesystem::path path);
+  // Returns nullptr, and why in error, if libarchive doesn't recognize path.
+  static LibarchiveFormat *open(const std::string &path, std::string &error);
 
   std::vector<Entry> files() override;
   std::unique_ptr<Extraction>
-  extract(const std::filesystem::path &dir) override;
+  extract(const std::string &dir) override;
 
 private:
-  std::filesystem::path path;
+  LibarchiveFormat(std::string path) : path(std::move(path)) {}
+
+  std::string path;
 };
