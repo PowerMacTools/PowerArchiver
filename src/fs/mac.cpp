@@ -1,6 +1,5 @@
 #ifdef macintosh
 
-#include "detail.hpp"
 #include "fs.hpp"
 
 #include <Mw/Milsko.h>
@@ -42,7 +41,7 @@ static bool failed(std::string &error, const std::string &what,
   return false;
 }
 
-std::string detail::component(const std::string &name) {
+std::string component(const std::string &name) {
   // ':' separates paths, so swap it for '/' as Mac OS X does the other way
   // round, and keep to max_name characters, counting UTF-8 lead bytes.
   std::string result;
@@ -145,8 +144,6 @@ bool write_resource_fork(const std::string &path, const void *data,
   return true;
 }
 
-namespace {
-
 // Internet Config, which is loaded at run time, since it only comes with
 // Mac OS 8.5 and later.
 struct internet_config {
@@ -157,8 +154,6 @@ struct internet_config {
                            ICMapEntry *entry);
   ICInstance instance = nullptr;
 };
-
-} // namespace
 
 // Returns Internet Config, connected for the life of the program, or nullptr
 // if it isn't available.

@@ -18,8 +18,6 @@ static std::string error_string(archive *a) {
 
 // archive_read_open_filename() needs fstat(), which classic Mac OS lacks, so
 // read the file through stdio instead.
-namespace {
-
 struct source {
   std::string path;
   FILE *file = nullptr;
@@ -70,8 +68,6 @@ int source_close(archive *a, void *data) {
   delete src;
   return ARCHIVE_OK;
 }
-
-} // namespace
 
 // Returns a null archive_ptr, and why in error, on failure.
 static archive_ptr open_archive(const std::string &path, std::string &error) {
@@ -271,8 +267,6 @@ std::vector<Format::Entry> LibarchiveFormat::files() {
 
   return root;
 }
-
-namespace {
 
 using write_ptr = std::unique_ptr<archive, decltype(&archive_write_free)>;
 
@@ -495,8 +489,6 @@ private:
   std::vector<std::string> skipped_names;
   bool in_entry = false;
 };
-
-} // namespace
 
 std::unique_ptr<Format::Extraction>
 LibarchiveFormat::extract(const std::string &dir) {

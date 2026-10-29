@@ -1,5 +1,4 @@
 #include "fs.hpp"
-#include "detail.hpp"
 
 #include <memory>
 
@@ -17,7 +16,7 @@ bool join_member(const std::string &dir, const std::string &member,
       return false;
     }
     if (!part.empty() && part != ".") {
-      path = join(path, detail::component(part));
+      path = join(path, component(part));
     }
     if (slash == std::string::npos) {
       break;

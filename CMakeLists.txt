@@ -84,7 +84,9 @@ else()
   find_program(HMKDIR hmkdir)
   find_program(HUMOUNT humount)
   if(HFORMAT AND HMOUNT AND HCOPY AND HMKDIR AND HUMOUNT)
-    set(disk ${CMAKE_CURRENT_BINARY_DIR}/PowerArchiver.dsk)
+    # add_application() already makes ${PROJECT_NAME}.dsk, with only the
+    # application on it
+    set(disk ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}-full.dsk)
     set(copy_icons)
     foreach(icon ${used_icons})
       list(APPEND copy_icons
@@ -94,7 +96,7 @@ else()
       OUTPUT ${disk}
       COMMAND ${CMAKE_COMMAND} -E rm -f ${disk}
       COMMAND dd if=/dev/zero of=${disk} bs=1M count=32 status=none
-      COMMAND ${HFORMAT} -l PowerArchiver ${disk}
+      COMMAND ${HFORMAT} -l ${PROJECT_NAME} ${disk}
       # hcopy -m unpacks MacBinary, keeping the resource fork
       COMMAND ${HCOPY} -m ${PROJECT_NAME}.bin :${PROJECT_NAME}
       COMMAND ${HCOPY} -r ${MAGIC_DATABASE} :magic.mgc
@@ -105,7 +107,7 @@ else()
       DEPENDS ${PROJECT_NAME}_APPL ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}.bin
               ${MAGIC_DATABASE}
       WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-      COMMENT "Making PowerArchiver.dsk"
+      COMMENT "Making ${PROJECT_NAME}-full.dsk"
       VERBATIM)
     add_custom_target(disk_image ALL DEPENDS ${disk})
   else()

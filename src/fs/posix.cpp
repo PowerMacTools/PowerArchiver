@@ -1,6 +1,5 @@
 #ifndef macintosh
 
-#include "detail.hpp"
 #include "fs.hpp"
 
 #include <cerrno>
@@ -9,7 +8,7 @@
 
 namespace fs {
 
-std::string detail::component(const std::string &name) { return name; }
+std::string component(const std::string &name) { return name; }
 
 std::string join(const std::string &dir, const std::string &name) {
   if (dir.empty()) {

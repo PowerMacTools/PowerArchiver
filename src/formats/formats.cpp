@@ -50,12 +50,10 @@ void Format::Entry::set_mime_type_function(
   resolve_mime_type = std::move(resolve);
 }
 
-// Why the magic database couldn't be loaded, if it couldn't.
 static std::string magic_problem;
 
-// magic_load() needs stat(), which classic Mac OS lacks, so read the database
-// ourselves and load it from memory. libmagic keeps pointing into the buffer,
-// so it lives as long as the program.
+// magic_load() needs stat(), which is missing from classic Mac OS, so read the
+// database ourselves and load it from memory.
 static magic_t open_magic(int flags) {
   static const fs::buffer database = [] {
     fs::buffer data;

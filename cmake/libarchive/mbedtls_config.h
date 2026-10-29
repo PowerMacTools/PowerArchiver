@@ -1,8 +1,3 @@
-/* Minimal mbed TLS configuration: only what libarchive uses, which is AES and
- * PBKDF2/HMAC for WinZip AES encrypted zips, and its digest functions. Leaves out entropy, networking and timing, which aren't available
- * everywhere we build (classic Mac OS). VERSION_C is for
- * archive_version_details(). */
-
 #define MBEDTLS_AES_C
 #define MBEDTLS_MD_C
 #define MBEDTLS_MD5_C
